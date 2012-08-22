@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "NSDate+XMPPDateTimeProfiles.h"
+#import "NSString+XMPPDateTimeProfiles.h"
 
 @interface XMPPDateTimeProfiles : NSObject
 
@@ -14,4 +15,5 @@
 
 + (NSTimeZone *)parseTimeZoneOffset:(NSString *)tzo;
 
++ (NSString *)formatDateTimeUTC:(NSDate*)date;
 @end
