@@ -290,15 +290,4 @@
 	return [NSTimeZone timeZoneForSecondsFromGMT:secondsOffset];
 }
 
-+ (NSDateFormatter *)ISO8601Formatter {
-    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-    [dateFormatter setTimeZone:[NSTimeZone timeZoneWithName:@"UTC"]];
-    [dateFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"];
-    
-	return dateFormatter;
-}
-
-+ (NSString *)formatDateTimeUTC:(NSDate*)date {
-    return [[XMPPDateTimeProfiles ISO8601Formatter] stringFromDate:date];
-}
 @end
