@@ -19,8 +19,7 @@
 	dispatch_queue_t turnQueue;
 	
 	XMPPStream *xmppStream;
-	XMPPJID *jid;
-	NSString *uuid;
+	NSString *iqId;
 	
 	id delegate;
 	dispatch_queue_t delegateQueue;
@@ -53,10 +52,15 @@
 + (NSArray *)proxyCandidates;
 + (void)setProxyCandidates:(NSArray *)candidates;
 
+- (void)setProxyCandidatesJIDs:(NSArray *)candidates;
+
+@property (nonatomic, strong) NSString *sid;
+@property (nonatomic, strong) XMPPJID *jid;
+
 - (id)initWithStream:(XMPPStream *)xmppStream toJID:(XMPPJID *)jid;
 - (id)initWithStream:(XMPPStream *)xmppStream incomingTURNRequest:(XMPPIQ *)iq;
 
-- (void)startWithDelegate:(id)aDelegate delegateQueue:(dispatch_queue_t)aDelegateQueue;
+- (void)startWithDelegate:(id)aDelegate delegateQueue:(dispatch_queue_t)aDelegateQueue skipDiscoverCandidate:(bool)skipDiscoverCandidate;
 
 - (BOOL)isClient;
 
@@ -70,9 +74,11 @@
 
 @protocol TURNSocketDelegate
 @optional
-
+- (void)turnSocket:(TURNSocket *)sender didReadData:(NSData *)data withTag:(long)tag fromSocket:(GCDAsyncSocket*) socket;
+- (void)turnSocket:(TURNSocket *)sender didDisconnect:(NSError *)err fromSocket:(GCDAsyncSocket *)socket;
 - (void)turnSocket:(TURNSocket *)sender didSucceed:(GCDAsyncSocket *)socket;
-
+- (void)turnSocket:(TURNSocket *)sender didWritePartialDataOfLength:(NSUInteger)partialLength withTag:(long)tag fromSocket:(GCDAsyncSocket*) socket;
+- (void)turnSocket:(TURNSocket *)sender didWriteDataWithTag:(long)tag fromSocket:(GCDAsyncSocket*) socket;
 - (void)turnSocketDidFail:(TURNSocket *)sender;
 
 @end

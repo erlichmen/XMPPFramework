@@ -103,6 +103,8 @@
 
 @implementation TURNSocket
 
+@synthesize sid, jid;
+
 static NSMutableDictionary *existingTurnSockets;
 static NSMutableArray *proxyCandidates;
 
@@ -147,6 +149,10 @@ static NSMutableArray *proxyCandidates;
 	// If this attribute is not included, the default value of "tcp" MUST be assumed.
 	// This attribute is OPTIONAL.
 	
+    if ([iq.type caseInsensitiveCompare:@"set"] != NSOrderedSame) {
+        return NO;
+    }
+    
 	NSXMLElement *query = [iq elementForName:@"query" xmlns:@"http://jabber.org/protocol/bytestreams"];
 	if (query == nil) {
 		return NO;
@@ -205,6 +211,16 @@ static NSMutableArray *proxyCandidates;
 	}
 }
 
+- (void)setProxyCandidatesJIDs:(NSArray *)candidates
+{
+    NSMutableArray *tempCandidateJIDs = [[NSMutableArray alloc] initWithCapacity:[candidates count]];
+    
+    [tempCandidateJIDs removeAllObjects];
+    [tempCandidateJIDs addObjectsFromArray:candidates];
+    
+    candidateJIDs = tempCandidateJIDs;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Init, Dealloc
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -228,7 +244,7 @@ static NSMutableArray *proxyCandidates;
 		// Relying only on JID's is troublesome, because client A could be initiating a connection to server B,
 		// while at the same time client B could be initiating a connection to server A.
 		// So an incoming connection from JID clientB@deusty.com/home would be for which turn socket?
-		uuid = [xmppStream generateUUID];
+		iqId = [xmppStream generateUUID];
 		
 		// Setup initial state for a client connection
 		state = STATE_INIT;
@@ -257,16 +273,17 @@ static NSMutableArray *proxyCandidates;
 		// Store references
 		xmppStream = stream;
 		jid = [iq from];
-		
-		// Store a copy of the ID (which will be our uuid)
-		uuid = [[iq elementID] copy];
-		
+				
 		// Setup initial state for a server connection
 		state = STATE_INIT;
 		isClient = NO;
 		
 		// Extract streamhost information from turn request
 		NSXMLElement *query = [iq elementForName:@"query" xmlns:@"http://jabber.org/protocol/bytestreams"];
+        
+        // Store a copy of the ID (which will be our uuid)
+		sid = [[query attributeStringValueForName:@"sid"] copy];
+        iqId = [[iq elementID] copy];
 		streamhosts = [[query elementsForName:@"streamhost"] mutableCopy];
 		
 		// Configure everything else
@@ -289,7 +306,7 @@ static NSMutableArray *proxyCandidates;
 	
 	@synchronized(existingTurnSockets)
 	{
-		[existingTurnSockets setObject:self forKey:uuid];
+		[existingTurnSockets setObject:self forKey:iqId];
 	}
 }
 
@@ -343,7 +360,7 @@ static NSMutableArray *proxyCandidates;
  * Starts the TURNSocket with the given delegate.
  * If the TURNSocket has already been started, this method does nothing, and the existing delegate is not changed.
 **/
-- (void)startWithDelegate:(id)aDelegate delegateQueue:(dispatch_queue_t)aDelegateQueue
+- (void)startWithDelegate:(id)aDelegate delegateQueue:(dispatch_queue_t)aDelegateQueue skipDiscoverCandidate:(bool)skipDiscoverCandidate
 {
 	NSParameterAssert(aDelegate != nil);
 	NSParameterAssert(aDelegateQueue != NULL);
@@ -392,7 +409,11 @@ static NSMutableArray *proxyCandidates;
 		// Start the TURN procedure
 		
 		if (isClient)
-			[self queryProxyCandidates];
+			if (skipDiscoverCandidate) {
+                [self queryProxyAddress];
+            } else {
+                [self queryProxyCandidates];
+            }
 		else
 			[self targetConnect];
 		
@@ -458,7 +479,7 @@ static NSMutableArray *proxyCandidates;
 	// </iq>
 	
 	NSXMLElement *query = [NSXMLElement elementWithName:@"query" xmlns:@"http://jabber.org/protocol/bytestreams"];
-	[query addAttributeWithName:@"sid" stringValue:uuid];
+	[query addAttributeWithName:@"sid" stringValue:sid];
 	[query addAttributeWithName:@"mode" stringValue:@"tcp"];
 	
 	NSUInteger i;
@@ -467,7 +488,7 @@ static NSMutableArray *proxyCandidates;
 		[query addChild:[streamhosts objectAtIndex:i]];
 	}
 	
-	XMPPIQ *iq = [XMPPIQ iqWithType:@"set" to:jid elementID:uuid child:query];
+	XMPPIQ *iq = [XMPPIQ iqWithType:@"set" to:jid elementID:iqId child:query];
 	
 	[xmppStream sendElement:iq];
 	
@@ -494,10 +515,10 @@ static NSMutableArray *proxyCandidates;
 	[streamhostUsed addAttributeWithName:@"jid" stringValue:[proxyJID full]];
 	
 	NSXMLElement *query = [NSXMLElement elementWithName:@"query" xmlns:@"http://jabber.org/protocol/bytestreams"];
-	[query addAttributeWithName:@"sid" stringValue:uuid];
+	[query addAttributeWithName:@"sid" stringValue:sid];
 	[query addChild:streamhostUsed];
 	
-	XMPPIQ *iq = [XMPPIQ iqWithType:@"result" to:jid elementID:uuid child:query];
+	XMPPIQ *iq = [XMPPIQ iqWithType:@"result" to:jid elementID:iqId child:query];
 	
 	[xmppStream sendElement:iq];
 }
@@ -515,10 +536,10 @@ static NSMutableArray *proxyCandidates;
 	NSXMLElement *activate = [NSXMLElement elementWithName:@"activate" stringValue:[jid full]];
 	
 	NSXMLElement *query = [NSXMLElement elementWithName:@"query" xmlns:@"http://jabber.org/protocol/bytestreams"];
-	[query addAttributeWithName:@"sid" stringValue:uuid];
+	[query addAttributeWithName:@"sid" stringValue:sid];
 	[query addChild:activate];
 	
-	XMPPIQ *iq = [XMPPIQ iqWithType:@"set" to:proxyJID elementID:uuid child:query];
+	XMPPIQ *iq = [XMPPIQ iqWithType:@"set" to:proxyJID elementID:iqId child:query];
 	
 	[xmppStream sendElement:iq];
 	
@@ -548,7 +569,7 @@ static NSMutableArray *proxyCandidates;
 	[error addAttributeWithName:@"type" stringValue:@"cancel"];
 	[error addChild:inf];
 	
-	XMPPIQ *iq = [XMPPIQ iqWithType:@"error" to:jid elementID:uuid child:error];
+	XMPPIQ *iq = [XMPPIQ iqWithType:@"error" to:jid elementID:iqId child:error];
 	
 	[xmppStream sendElement:iq];
 }
@@ -572,7 +593,7 @@ static NSMutableArray *proxyCandidates;
 	}
 	else
 	{
-		if (![uuid isEqualToString:[iq elementID]])
+		if (![iqId isEqualToString:[iq elementID]])
 		{
 			// Doesn't apply to us
 			return NO;
@@ -731,6 +752,11 @@ static NSMutableArray *proxyCandidates;
 	
 	if(streamhostJID != nil || host != nil || port > 0)
 	{
+        // Prepare the streamhosts array, which will hold all of our results
+        if (streamhosts == nil) {
+            streamhosts = [[NSMutableArray alloc] initWithCapacity:[proxyCandidates count]];
+        }
+        
 		[streamhost detach];
 		[streamhosts addObject:streamhost];
 	}
@@ -833,10 +859,7 @@ static NSMutableArray *proxyCandidates;
 - (void)queryProxyCandidates
 {
 	XMPPLogTrace();
-	
-	// Prepare the streamhosts array, which will hold all of our results
-	streamhosts = [[NSMutableArray alloc] initWithCapacity:[proxyCandidates count]];
-	
+		
 	// Start querying each candidate in order
 	proxyCandidateIndex = -1;
 	[self queryNextProxyCandidate];
@@ -1142,7 +1165,7 @@ static NSMutableArray *proxyCandidates;
 	XMPPJID *initiatorJID = isClient ? myJID : jid;
 	XMPPJID *targetJID    = isClient ? jid   : myJID;
 	
-	NSString *hashMe = [NSString stringWithFormat:@"%@%@%@", uuid, [initiatorJID full], [targetJID full]];
+	NSString *hashMe = [NSString stringWithFormat:@"%@%@%@", sid, initiatorJID.full, targetJID.bare];
 	NSData *hashRaw = [[hashMe dataUsingEncoding:NSUTF8StringEncoding] sha1Digest];
 	NSData *hash = [[hashRaw hexStringValue] dataUsingEncoding:NSUTF8StringEncoding];
 	
@@ -1225,6 +1248,18 @@ static NSMutableArray *proxyCandidates;
 	
 	// Start the SOCKS protocol stuff
 	[self socksOpen];
+}
+
+- (void)socket:(GCDAsyncSocket *)sock didWriteDataWithTag:(long)tag {
+    if ([delegate respondsToSelector:@selector(turnSocket:didWriteDataWithTag:fromSocket:)]) {
+        [delegate turnSocket:self didWriteDataWithTag:tag fromSocket:sock];
+    }    
+}
+
+- (void)socket:(GCDAsyncSocket *)sock didWritePartialDataOfLength:(NSUInteger)partialLength tag:(long)tag {
+    if ([delegate respondsToSelector:@selector(turnSocket:didWritePartialDataOfLength:withTag:fromSocket:)]) {
+        [delegate turnSocket:self didWritePartialDataOfLength:partialLength withTag:tag fromSocket:sock];
+    }    
 }
 
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData *)data withTag:(long)tag
@@ -1320,7 +1355,14 @@ static NSMutableArray *proxyCandidates;
 			[self sendReply];
 			[self succeed];
 		}
-	}
+	} else if (state == STATE_DONE) {
+		if ([delegate respondsToSelector:@selector(turnSocket:didReadData:withTag:fromSocket:)])
+		{        
+            [delegate turnSocket:self didReadData:data withTag:tag fromSocket:sock];
+        }
+    } else {
+       	NSAssert(false, @"Invalid state");
+    }
 }
 
 - (void)socketDidDisconnect:(GCDAsyncSocket *)sock withError:(NSError *)err
@@ -1333,8 +1375,14 @@ static NSMutableArray *proxyCandidates;
 	}
 	else if (state == STATE_INITIATOR_CONNECT)
 	{
-		[self fail];
+		
+        [self fail];
 	}
+    
+    if ([delegate respondsToSelector:@selector(turnSocket:didDisconnect:fromSocket:)])
+    {        
+        [delegate turnSocket:self didDisconnect:err fromSocket:sock];
+    }    
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1492,8 +1540,6 @@ static NSMutableArray *proxyCandidates;
 			[delegate turnSocket:self didSucceed:asyncSocket];
 		}
 	}});
-	
-	[self cleanup];
 }
 
 - (void)fail
@@ -1551,7 +1597,7 @@ static NSMutableArray *proxyCandidates;
 	// Remove self from existingStuntSockets dictionary so we can be deallocated
 	@synchronized(existingTurnSockets)
 	{
-		[existingTurnSockets removeObjectForKey:uuid];
+		[existingTurnSockets removeObjectForKey:iqId];
 	}
 }
 
